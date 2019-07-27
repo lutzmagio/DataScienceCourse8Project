@@ -1,0 +1,108 @@
+---
+title: "Practical Machine Learning Assignment - "
+author: "Henry Voelker"
+date: "28 July 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+Data from activity sensors (fitness trackers) is analyzed for classification purposes. Weight lifting was done by several participants. A classification / grading of the correctness of their movement is available in the given data.
+
+After training a model to classify / grade, a test set of 20 examples is predicted upon. The answers have been submitted in the Coursera quiz and gave 90 % accuracy.
+
+
+## Load data
+```{r load}
+rawTraining <- read.csv("pml-training.csv")
+rawTesting <- read.csv("pml-testing.csv")
+```
+
+## Explore data
+Size of raw training and testing set:
+```{r sizeCheck}
+dim(rawTraining)
+dim(rawTesting)
+```
+
+Frequency / distribution of classes in training set:
+```{r classDistribution}
+table(rawTraining$classe) / dim(rawTraining)[1]
+```
+
+First columns:
+```{r firstColumns}
+head(names(rawTraining),20)
+```
+The first columns are not containing data that is relevant for the outcome (classification). Even a misleading corellation might be found by the trained model if for example leaving "user" among the predictors. The trained model shall be useable for other people than participants in data collection.
+
+Since the raw training set has many examples (rows) and many features (columns), a size reduction is necessary. Also columns full of NA or with lots of missing values exist. Where there are NA or missing values the amount of missing values is so big that imputation is not possible.
+
+To save computation work, a smaller sample of the raw training set is used for training, the rest is used for validation.
+
+## Prepare data
+Data preparation is done to remove columns that are suspected to decrease prediction accuracy or introduce formal problems.
+```{r loadprepare}
+# Drop columns that are NA mainly
+NAcount <- colSums(is.na(rawTraining))
+NAcolumns <- which(NAcount > dim(rawTraining)[1] * 0.8)
+# Drop empty columns
+EmptyColumns <- which(apply(rawTraining, 2, function(x){sum(x == "")}) > dim(rawTraining)[1] * 0.8)
+# Drop columns that don't contain information about the movement
+DropNames <- c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")
+DropColumns <- c(NAcolumns, EmptyColumns, which((names(rawTraining) %in% DropNames)))
+# Prepare data sets
+training <- rawTraining[, -DropColumns]
+testing <- rawTesting[, -DropColumns]
+```
+
+## Cross validation
+Validation is needed to choose which model (boost, random forest, PCA yes/no) is selected. Also, validation is used to decide on a training set size that balances computational expense and result accuracy.
+
+Since validation is needed and the amount of training data is too big to train in a single complete training set, the raw training set is split into
+* training set
+* validation set
+
+```{r splitvalidation}
+library(caret)
+set.seed(123456)
+inTrain <- createDataPartition(y = rawTraining$classe, p = 0.05, list = FALSE)
+validation <- training[-inTrain, ]
+training <- training[inTrain, ]
+```
+
+## Fit boosting model
+A boosting model is trained based on training data. Centering and scaling are done as pre-processing.
+```{r modelBoostingTraining}
+modelBoost <- train(classe ~ ., method = "gbm", verbose = FALSE, preProcess = c("center", "scale"), data = training)
+```
+
+## Review accuracy in validation set
+The quality of the trained boosting model is reviewed by checking the accuracy and other metrics.
+```{r reviewError}
+valBoost <- predict(modelBoost, validation)
+confusionMatrix(data = valBoost, reference = validation$classe)
+```
+The accuracy in the validation set is 89 %
+The predicted out of sample error is 11 %.
+
+## Review of other models
+### PCA
+Principal Component Analysis was tried as a preparation step, however it reduced the accuracy on the validation set and was therefore skipped.
+
+### Random forest
+Random forest was found to be computationally more expensive (longer training time on same training set size) than boosting. Since boosting gives sufficient accuracy, random forest was not chosen for the final model.
+
+## Test set
+The test set, containing 20 examples, is used for prediction.
+```{r testSet}
+predTest = data.frame(case_no = seq(1:20), prediction = predict(modelBoost, testing))
+predTest
+```
+The predictions are filled into the Coursera online quiz. The quiz is passed with 18 out of 20 answers (90 %) correct.
+
+## Conclusion
+The predicted out of sample error of approx 11 % / predicted accuracy of future predictions of approx. 89 % is confirmed by the Coursera Data Science quiz (course 8, week 4), where 90 % was scored. This means 18 out of 20 predictions on the test set were correct.
